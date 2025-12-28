@@ -17,9 +17,17 @@ import configuration from './config/configuration';
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        uri: configService.get<string>('database.url'),
-      }),
+      useFactory: (configService: ConfigService) => {
+        const uri = configService.get<string>('database.url');
+        if (!uri) {
+          throw new Error('DATABASE_URL is not defined in environment variables');
+        }
+        return {
+          uri,
+          retryWrites: true,
+          w: 'majority',
+        };
+      },
     }),
     AuthModule,
     UsersModule,

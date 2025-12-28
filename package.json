@@ -3,9 +3,9 @@
   "version": "0.0.1",
   "description": "Quiz web app backend built with NestJS and Mongoose.",
   "scripts": {
-    "start": "nest start",
+    "start": "NODE_OPTIONS=--max-old-space-size=4096 nest start",
     "start:dev": "nest start --watch",
-    "build": "nest build",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 nest build",
     "lint": "eslint \"src/**/*.{ts,js}\" --fix",
     "seed": "ts-node -r tsconfig-paths/register src/seed.ts"
   },

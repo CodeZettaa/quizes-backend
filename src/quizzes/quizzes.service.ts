@@ -439,11 +439,12 @@ export class QuizzesService {
         (o: any) => o.isCorrect === true
       );
 
-      const isCorrect =
+      const isCorrect = Boolean(
         selectedOptionId &&
         correctOption &&
         correctOption._id &&
-        correctOption._id.toString() === selectedOptionId;
+        correctOption._id.toString() === selectedOptionId
+      );
 
       // Save the answer for review
       if (selectedOptionId) {

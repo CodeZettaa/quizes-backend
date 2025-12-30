@@ -34,10 +34,12 @@ export class AuthService {
       throw new BadRequestException("Email already in use");
     }
     const hashed = await bcrypt.hash(payload.password, 10);
+    const { selectedSubjects, ...userData } = payload;
     const user = new this.userModel({
-      ...payload,
+      ...userData,
       password: hashed,
       role: UserRole.STUDENT,
+      selectedSubjects: selectedSubjects || [],
     });
     await user.save();
     return this.buildAuthResponse(user);
@@ -76,9 +78,17 @@ export class AuthService {
       // SocialAccount exists => get linked user
       user = await this.userModel.findById(socialAccount.userId);
       if (!user) {
-        throw new BadRequestException("Linked user not found");
+        // Orphaned SocialAccount (user was deleted but account wasn't)
+        // Delete the orphaned account and continue to create/link logic below
+        console.warn(
+          `Orphaned SocialAccount found for ${payload.provider}:${payload.providerUserId}, removing it`
+        );
+        await this.socialAccountModel.deleteOne({ _id: socialAccount._id });
+        socialAccount = null;
       }
-    } else if (payload.email) {
+    }
+    
+    if (!socialAccount && payload.email) {
       // 2. Try to find User by email
       user = await this.userModel.findOne({ email: payload.email });
       if (user) {

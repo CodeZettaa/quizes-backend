@@ -19,6 +19,7 @@ import { User, UserDocument } from './user.schema';
 import { UpdateProfileDto, ChangePasswordDto } from './dto/update-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
+import { UpdateSelectedSubjectsDto } from './dto/update-selected-subjects.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('users')
@@ -47,9 +48,22 @@ export class UsersController {
     return this.usersService.updatePassword(user._id.toString(), dto);
   }
 
+  @Patch('me/selected-subjects')
+  async updateSelectedSubjects(
+    @CurrentUser() user: UserDocument,
+    @Body() dto: UpdateSelectedSubjectsDto,
+  ) {
+    return this.usersService.updateSelectedSubjects(user._id.toString(), dto);
+  }
+
   @Get('me/stats')
   async getStats(@CurrentUser() user: UserDocument) {
     return this.usersService.getUserStats(user._id.toString());
+  }
+
+  @Get('me/active-session')
+  async getActiveSession(@CurrentUser() user: UserDocument) {
+    return this.usersService.getActiveSession(user._id.toString());
   }
 
   // Legacy/Additional Endpoints
@@ -91,8 +105,19 @@ export class UsersController {
   }
 
   @Get('me/attempts')
-  getAttempts(@CurrentUser() user: UserDocument) {
-    return this.usersService.getAttempts(user._id.toString());
+  getAttempts(
+    @CurrentUser() user: UserDocument,
+    @Query('subjectId') subjectId?: string,
+    @Query('level') level?: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit?: number,
+  ) {
+    return this.usersService.getAttempts(user._id.toString(), {
+      subjectId,
+      level,
+      page,
+      limit,
+    });
   }
 
   @Post('me/sync-points')

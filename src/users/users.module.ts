@@ -6,6 +6,7 @@ import { UsersController, LeaderboardController } from './users.controller';
 import { QuizAttempt, QuizAttemptSchema } from '../quizzes/quiz-attempt.schema';
 import { Quiz, QuizSchema } from '../quizzes/quiz.schema';
 import { Subject, SubjectSchema } from '../subjects/subject.schema';
+import { QuizSession, QuizSessionSchema } from '../quizzes/quiz-session.schema';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { Subject, SubjectSchema } from '../subjects/subject.schema';
       { name: QuizAttempt.name, schema: QuizAttemptSchema },
       { name: Quiz.name, schema: QuizSchema },
       { name: Subject.name, schema: SubjectSchema },
+      { name: QuizSession.name, schema: QuizSessionSchema },
     ]),
   ],
   providers: [UsersService],

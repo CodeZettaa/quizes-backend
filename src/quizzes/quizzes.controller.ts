@@ -46,6 +46,11 @@ export class QuizzesController {
     return this.quizzesService.findOne(id);
   }
 
+  @Get(":id/status")
+  getStatus(@Param("id") id: string, @UserId() userId: string) {
+    return this.quizzesService.getQuizStatus(id, userId);
+  }
+
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
   @Post()
@@ -69,6 +74,14 @@ export class QuizzesController {
   @Delete(":id")
   remove(@Param("id") id: string) {
     return this.quizzesService.remove(id);
+  }
+
+  @Post(":id/start")
+  async start(
+    @Param("id") id: string,
+    @UserId() userId: string
+  ) {
+    return this.quizzesService.startQuizSession(id, userId);
   }
 
   @Post(":id/submit")
@@ -124,5 +137,29 @@ export class QuizzesController {
     @UserId() userId: string
   ) {
     return this.quizzesService.getAttemptById(attemptId, userId);
+  }
+
+  /**
+   * POST /quizzes/session/:sessionId/heartbeat
+   * Update the last seen time for an active quiz session
+   */
+  @Post("session/:sessionId/heartbeat")
+  async heartbeatSession(
+    @Param("sessionId") sessionId: string,
+    @UserId() userId: string
+  ) {
+    return this.quizzesService.heartbeatSession(sessionId, userId);
+  }
+
+  /**
+   * POST /quizzes/session/:sessionId/abandon
+   * Abandon an active quiz session
+   */
+  @Post("session/:sessionId/abandon")
+  async abandonSession(
+    @Param("sessionId") sessionId: string,
+    @UserId() userId: string
+  ) {
+    return this.quizzesService.abandonSession(sessionId, userId);
   }
 }

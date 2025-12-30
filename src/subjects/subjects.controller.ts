@@ -5,14 +5,17 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/constants/roles.enum';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateSubjectDto } from './dto/create-subject.dto';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { UserDocument } from '../users/user.schema';
 
 @Controller('subjects')
 export class SubjectsController {
   constructor(private readonly subjectsService: SubjectsService) {}
 
+  @UseGuards(JwtAuthGuard)
   @Get()
-  findAll() {
-    return this.subjectsService.findAll();
+  findAll(@CurrentUser() user: UserDocument) {
+    return this.subjectsService.findAll(user._id.toString());
   }
 
   @Get(':id')

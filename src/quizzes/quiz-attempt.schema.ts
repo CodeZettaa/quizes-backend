@@ -1,20 +1,22 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
-import { Quiz } from './quiz.schema';
-import { User } from '../users/user.schema';
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Document, Types } from "mongoose";
+import { Quiz } from "./quiz.schema";
+import { User } from "../users/user.schema";
 
 export type QuizAttemptDocument = QuizAttempt & Document;
 
-@Schema({ timestamps: { createdAt: 'startedAt', updatedAt: 'finishedAt' }, collection: 'quiz_attempts' })
+@Schema({
+  timestamps: { createdAt: "startedAt", updatedAt: "finishedAt" },
+  collection: "quiz_attempts",
+})
 export class QuizAttempt {
   _id?: Types.ObjectId;
 
-  // Note: Users can take the same quiz multiple times
-  // There is NO unique constraint on (quiz, user) combination
-  @Prop({ type: Types.ObjectId, ref: 'Quiz', required: true })
+  // Note: Users can only complete a quiz once
+  @Prop({ type: Types.ObjectId, ref: "Quiz", required: true })
   quiz!: Types.ObjectId | Quiz;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: Types.ObjectId, ref: "User", required: true })
   user!: Types.ObjectId | User;
 
   @Prop({ type: Number, required: true })
@@ -29,15 +31,19 @@ export class QuizAttempt {
   @Prop({ type: Number, required: true })
   pointsEarned!: number;
 
-  @Prop({ type: String, sparse: true, default: null })
-  publicSlug?: string | null;
+  @Prop({ type: String, sparse: true, default: undefined, required: false })
+  publicSlug?: string;
 
   // Store user's answers for review
   @Prop({
     type: [
       {
-        questionId: { type: Types.ObjectId, ref: 'Question', required: true },
-        selectedOptionId: { type: Types.ObjectId, ref: 'AnswerOption', required: true },
+        questionId: { type: Types.ObjectId, ref: "Question", required: true },
+        selectedOptionId: {
+          type: Types.ObjectId,
+          ref: "AnswerOption",
+          required: true,
+        },
         isCorrect: { type: Boolean, required: true },
         _id: false,
       },
@@ -56,12 +62,15 @@ export class QuizAttempt {
 
 export const QuizAttemptSchema = SchemaFactory.createForClass(QuizAttempt);
 
-// Create a partial unique index that only indexes non-null publicSlug values
+// Create a sparse unique index that only indexes non-null publicSlug values
+// Sparse indexes skip documents where the field is null/undefined
 QuizAttemptSchema.index(
   { publicSlug: 1 },
   {
     unique: true,
-    partialFilterExpression: { publicSlug: { $ne: null } },
-  },
+    sparse: true, // Only index documents where publicSlug exists and is not null
+  }
 );
 
+// Prevent duplicate completed attempts for the same user+quiz
+QuizAttemptSchema.index({ user: 1, quiz: 1 }, { unique: true });

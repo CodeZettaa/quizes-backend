@@ -9,9 +9,11 @@ import { Subject, SubjectDocument } from '../subjects/subject.schema';
 import { UpdateProfileDto, ChangePasswordDto } from './dto/update-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
+import { UpdateSelectedSubjectsDto } from './dto/update-selected-subjects.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserStatsDto, PerSubjectStatsDto } from './dto/user-stats.dto';
 import { LeaderboardEntryDto } from './dto/leaderboard-entry.dto';
+import { QuizSession, QuizSessionDocument } from '../quizzes/quiz-session.schema';
 
 @Injectable()
 export class UsersService {
@@ -21,6 +23,7 @@ export class UsersService {
     private attemptModel: Model<QuizAttemptDocument>,
     @InjectModel(Quiz.name) private quizModel: Model<QuizDocument>,
     @InjectModel(Subject.name) private subjectModel: Model<SubjectDocument>,
+    @InjectModel(QuizSession.name) private sessionModel: Model<QuizSessionDocument>,
   ) {}
 
   async findByEmail(email: string) {
@@ -81,11 +84,102 @@ export class UsersService {
     };
   }
 
-  async getAttempts(userId: string) {
-    return this.attemptModel
-      .find({ user: userId })
-      .sort({ finishedAt: -1 })
-      .exec();
+  async getAttempts(
+    userId: string,
+    params?: { subjectId?: string; level?: string; page?: number; limit?: number },
+  ) {
+    const page = Math.max(params?.page || 1, 1);
+    const limit = Math.min(Math.max(params?.limit || 20, 1), 100);
+    const skip = (page - 1) * limit;
+
+    const userObjectId = new Types.ObjectId(userId);
+    const quizMatch: Record<string, any> = {};
+    if (params?.subjectId) {
+      quizMatch['quiz.subject'] = new Types.ObjectId(params.subjectId);
+    }
+    if (params?.level) {
+      quizMatch['quiz.level'] = params.level;
+    }
+
+    const pipeline: any[] = [
+      { $match: { user: userObjectId } },
+      {
+        $lookup: {
+          from: 'quizzes',
+          localField: 'quiz',
+          foreignField: '_id',
+          as: 'quiz',
+        },
+      },
+      { $unwind: '$quiz' },
+    ];
+
+    if (Object.keys(quizMatch).length > 0) {
+      pipeline.push({ $match: quizMatch });
+    }
+
+    pipeline.push(
+      {
+        $lookup: {
+          from: 'subjects',
+          localField: 'quiz.subject',
+          foreignField: '_id',
+          as: 'subject',
+        },
+      },
+      { $unwind: { path: '$subject', preserveNullAndEmptyArrays: true } },
+      { $sort: { finishedAt: -1 } },
+      {
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          items: [
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                quizId: '$quiz._id',
+                quizTitle: '$quiz.title',
+                subject: '$subject',
+                level: '$quiz.level',
+                score: 1,
+                totalQuestions: 1,
+                correctAnswersCount: 1,
+                pointsEarned: 1,
+                finishedAt: 1,
+              },
+            },
+          ],
+        },
+      },
+    );
+
+    const [result] = await this.attemptModel.aggregate(pipeline).exec();
+    const total = result?.metadata?.[0]?.total || 0;
+    const items = (result?.items || []).map((attempt: any) => ({
+      attemptId: attempt._id.toString(),
+      quizId: attempt.quizId?.toString() || '',
+      quizTitle: attempt.quizTitle || 'Unknown Quiz',
+      subject: attempt.subject
+        ? {
+            _id: attempt.subject._id?.toString(),
+            name: attempt.subject.name,
+          }
+        : null,
+      level: attempt.level || null,
+      score: attempt.score,
+      totalQuestions: attempt.totalQuestions,
+      correctAnswersCount: attempt.correctAnswersCount,
+      pointsEarned: attempt.pointsEarned,
+      finishedAt: attempt.finishedAt,
+    }));
+
+    return {
+      items,
+      page,
+      limit,
+      total,
+    };
   }
 
 
@@ -298,6 +392,7 @@ export class UsersService {
       avatarUrl: safeUser.avatarUrl || null,
       bio: safeUser.bio || null,
       totalPoints: safeUser.totalPoints,
+      selectedSubjects: safeUser.selectedSubjects || [],
       preferences: (safeUser.preferences as any) || {
         theme: 'system',
         language: 'en',
@@ -348,6 +443,42 @@ export class UsersService {
     await this.userModel.findByIdAndUpdate(userId, { password: hashedPassword });
     
     return { message: 'Password updated successfully' };
+  }
+
+  async updateSelectedSubjects(userId: string, dto: UpdateSelectedSubjectsDto): Promise<UserResponseDto> {
+    await this.userModel.findByIdAndUpdate(userId, {
+      selectedSubjects: dto.selectedSubjects,
+    }, { new: true });
+    return this.getMe(userId);
+  }
+
+  async getActiveSession(userId: string) {
+    const userObjectId = new Types.ObjectId(userId);
+    const now = new Date();
+
+    // Find active session that hasn't expired
+    const session = await this.sessionModel
+      .findOne({
+        user: userObjectId,
+        status: 'active',
+        expiresAt: { $gt: now },
+      })
+      .populate('quiz', '_id')
+      .lean()
+      .exec();
+
+    if (!session) {
+      return {
+        hasActiveSession: false,
+      };
+    }
+
+    return {
+      hasActiveSession: true,
+      sessionId: session._id.toString(),
+      quizId: (session.quiz as any)._id?.toString() || session.quiz.toString(),
+      expiresAt: session.expiresAt.toISOString(),
+    };
   }
 
   async getUserStats(userId: string): Promise<UserStatsDto> {

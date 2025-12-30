@@ -13,7 +13,8 @@ import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
-import { User, UserDocument } from "../users/user.schema";
+import { UserDocument } from "../users/user.schema";
+import { UsersService } from "../users/users.service";
 import { ConfigService } from "@nestjs/config";
 import { Response } from "express";
 import { GoogleProfile } from "./strategies/google.strategy";
@@ -25,6 +26,7 @@ import { LinkedInAuthGuard } from "./guards/linkedin-auth.guard";
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly usersService: UsersService,
     private readonly configService: ConfigService
   ) {}
 
@@ -40,16 +42,9 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get("me")
-  me(@CurrentUser() user: any) {
-    // User is already sanitized (password removed) by JWT strategy
-    // Handle both Mongoose documents and plain objects
-    if (user && typeof user.toObject === 'function') {
-      const { password, ...safeUser } = user.toObject();
-      return safeUser;
-    }
-    // Already a plain object from JWT strategy
-    const { password, ...safeUser } = user;
-    return safeUser;
+  async me(@CurrentUser() user: UserDocument) {
+    // Use UsersService.getMe to get properly formatted response with selectedSubjects
+    return this.usersService.getMe(user._id.toString());
   }
 
   // Google OAuth routes
@@ -97,6 +92,7 @@ export class AuthController {
   @UseGuards(LinkedInAuthGuard)
   linkedinAuth() {
     // Initiates LinkedIn OAuth flow - Passport handles redirect
+    // The guard will redirect to LinkedIn's OAuth page
   }
 
   @Get("linkedin/callback")
@@ -107,6 +103,11 @@ export class AuthController {
     @Query("state") state?: string
   ) {
     try {
+      // Check if there was an authentication error
+      if (req.linkedinAuthError) {
+        throw req.linkedinAuthError;
+      }
+
       const profile = req.user as LinkedInProfile;
       if (!profile) {
         throw new Error("No profile received from LinkedIn");
@@ -123,8 +124,14 @@ export class AuthController {
 
       const redirectUrl = `${frontendSuccessUrl}?token=${result.accessToken}&newUser=${result.newUser}`;
       res.redirect(redirectUrl);
-    } catch (error) {
+    } catch (error: any) {
       console.error("LinkedIn OAuth error:", error);
+      console.error("LinkedIn OAuth error details:", {
+        message: error?.message,
+        stack: error?.stack,
+        response: error?.response?.data,
+        status: error?.response?.status,
+      });
       const frontendFailureUrl =
         this.configService.get<string>("FRONTEND_FAILURE_REDIRECT") ||
         "http://localhost:8888/auth/login";

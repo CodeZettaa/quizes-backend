@@ -1,4 +1,5 @@
 import { UserPreferences } from "./user-preferences.dto";
+import { SubjectName } from "../../common/constants/subject-type.enum";
 
 export class UserResponseDto {
   _id!: string;
@@ -8,6 +9,7 @@ export class UserResponseDto {
   avatarUrl?: string | null;
   bio?: string | null;
   totalPoints!: number;
+  selectedSubjects?: SubjectName[];
   preferences?: UserPreferences;
   createdAt?: Date;
   updatedAt?: Date;

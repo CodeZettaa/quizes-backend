@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import { Quiz, QuizDocument } from "./quiz.schema";
@@ -21,6 +21,7 @@ import {
   RandomQuestionDto,
 } from "./dto/generate-random-questions.dto";
 import { QuizLevel } from "../common/constants/quiz-level.enum";
+import { QuizSession, QuizSessionDocument } from "./quiz-session.schema";
 
 @Injectable()
 export class QuizzesService {
@@ -32,6 +33,8 @@ export class QuizzesService {
     private optionModel: Model<AnswerOptionDocument>,
     @InjectModel(QuizAttempt.name)
     private attemptModel: Model<QuizAttemptDocument>,
+    @InjectModel(QuizSession.name)
+    private sessionModel: Model<QuizSessionDocument>,
     private usersService: UsersService,
     private articleSuggestionService: ArticleSuggestionService
   ) {}
@@ -40,6 +43,36 @@ export class QuizzesService {
     const query: any = {};
     if (filter?.subjectId) query.subject = new Types.ObjectId(filter.subjectId);
     if (filter?.level) query.level = filter.level;
+
+    // Filter by user's selectedSubjects if userId is provided
+    if (userId) {
+      const user = await this.usersService.findById(userId);
+      if (user.selectedSubjects && user.selectedSubjects.length > 0) {
+        // Get subject IDs for user's selected subjects
+        const subjects = await this.subjectModel
+          .find({ name: { $in: user.selectedSubjects } })
+          .select('_id')
+          .lean()
+          .exec();
+        const subjectIds = subjects.map(s => s._id);
+        if (subjectIds.length > 0) {
+          // If subjectId filter is already set, ensure it's in the selected subjects
+          if (query.subject) {
+            if (!subjectIds.some(id => id.toString() === query.subject.toString())) {
+              // User's selected subjects don't include the requested subject
+              return [];
+            }
+          } else {
+            // Filter by selected subjects
+            query.subject = { $in: subjectIds };
+          }
+        } else {
+          // User has selected subjects but they don't exist in database
+          return [];
+        }
+      }
+    }
+
     const quizzes = await this.quizModel
       .find(query)
       .populate("subject")
@@ -53,17 +86,21 @@ export class QuizzesService {
       filter
     );
 
-    // Get quiz IDs that user has attempted (if userId is provided)
-    let attemptedQuizIds = new Set<string>();
+    // Get quiz IDs that user has completed (if userId is provided)
+    // Only count attempts that are finished (completed), not incomplete ones
+    let completedQuizIds = new Set<string>();
     if (userId) {
       const userObjectId = new Types.ObjectId(userId);
-      const attempts = await this.attemptModel
-        .find({ user: userObjectId })
+      const completedAttempts = await this.attemptModel
+        .find({ 
+          user: userObjectId,
+          finishedAt: { $ne: null } // Only completed attempts
+        })
         .select("quiz")
         .lean()
         .exec();
-      attemptedQuizIds = new Set(
-        attempts.map((attempt) => {
+      completedQuizIds = new Set(
+        completedAttempts.map((attempt) => {
           const quizId = attempt.quiz as any;
           return quizId?._id ? quizId._id.toString() : quizId.toString();
         })
@@ -129,11 +166,11 @@ export class QuizzesService {
           questions: questions || [],
         });
 
-        // Add hasTaken flag if userId is provided
+        // Add hasTaken flag if userId is provided (only for completed quizzes)
         if (userId) {
           return {
             ...strippedQuiz,
-            hasTaken: attemptedQuizIds.has(quizId),
+            hasTaken: completedQuizIds.has(quizId),
           };
         }
 
@@ -363,6 +400,9 @@ export class QuizzesService {
     const quiz = await this.quizModel.findById(id).lean().exec();
     if (!quiz) throw new NotFoundException("Quiz not found");
 
+    const userObjectId = new Types.ObjectId(userId);
+    // Users can only take each quiz once (enforced by unique index)
+
     // Extract question IDs properly
     const questionIds = Array.isArray(quiz.questions)
       ? quiz.questions
@@ -486,11 +526,33 @@ export class QuizzesService {
     const score = correctAnswersCount;
     const pointsEarned = correctAnswersCount * 10;
 
-    // Convert userId string to ObjectId
-    const userObjectId = new Types.ObjectId(userId);
-
     // Fetch user to verify it exists and get user document
     const user = await this.usersService.findById(userId);
+
+    // Check if attempt already exists before creating a new one
+    const existingAttempt = await this.attemptModel.findOne({
+      user: userObjectId,
+      quiz: new Types.ObjectId(id),
+    }).lean().exec();
+
+    if (existingAttempt) {
+      console.log('[QuizzesService] Existing attempt found:', {
+        attemptId: existingAttempt._id?.toString(),
+        userId: userObjectId.toString(),
+        quizId: id,
+        score: existingAttempt.score,
+        finishedAt: existingAttempt.finishedAt,
+      });
+      throw new ConflictException({
+        code: "QUIZ_ALREADY_TAKEN",
+        message: "You already completed this quiz",
+      });
+    }
+    
+    console.log('[QuizzesService] No existing attempt found, creating new one:', {
+      userId: userObjectId.toString(),
+      quizId: id,
+    });
 
     const attempt = new this.attemptModel({
       quiz: new Types.ObjectId(id),
@@ -501,12 +563,64 @@ export class QuizzesService {
       pointsEarned,
       answers: savedAnswers,
     });
-    await attempt.save();
+    try {
+      console.log('[QuizzesService] Attempting to save quiz attempt:', {
+        userId: userObjectId.toString(),
+        quizId: id,
+        score,
+        totalQuestions,
+      });
+      await attempt.save();
+      console.log('[QuizzesService] Quiz attempt saved successfully:', {
+        attemptId: attempt._id?.toString(),
+      });
+    } catch (error: any) {
+      console.error('[QuizzesService] Error saving attempt:', {
+        code: error?.code,
+        codeName: error?.codeName,
+        message: error?.message,
+        keyPattern: error?.keyPattern,
+        keyValue: error?.keyValue,
+      });
+      if (error?.code === 11000) {
+        // Duplicate key error - race condition or duplicate submission
+        // Double-check if attempt exists now
+        const verifyAttempt = await this.attemptModel.findOne({
+          user: userObjectId,
+          quiz: new Types.ObjectId(id),
+        }).lean().exec();
+        console.log('[QuizzesService] Duplicate key error - verifying attempt exists:', {
+          found: !!verifyAttempt,
+          attemptId: verifyAttempt?._id?.toString(),
+        });
+        throw new ConflictException({
+          code: "QUIZ_ALREADY_TAKEN",
+          message: "You already completed this quiz",
+        });
+      }
+      throw error;
+    }
 
     const updatedUser = await this.usersService.incrementPoints(
       userId,
       pointsEarned
     );
+
+    // Update session if sessionId is provided
+    if (dto.sessionId) {
+      const sessionObjectId = new Types.ObjectId(dto.sessionId);
+      await this.sessionModel.findOneAndUpdate(
+        {
+          _id: sessionObjectId,
+          user: userObjectId,
+          status: 'active',
+        },
+        {
+          status: 'submitted',
+          attemptId: attempt._id,
+        }
+      ).exec();
+    }
 
     const response: SubmitQuizResponseDto = {
       attemptId: attempt._id.toString(),
@@ -943,6 +1057,173 @@ export class QuizzesService {
       startedAt: attempt.startedAt,
       finishedAt: attempt.finishedAt,
       questions: questionsWithAnswers,
+    };
+  }
+
+  async getQuizStatus(quizId: string, userId: string) {
+    if (!quizId || quizId === "undefined") {
+      throw new NotFoundException("Quiz ID is required");
+    }
+
+    const attempt = await this.attemptModel
+      .findOne({
+        quiz: new Types.ObjectId(quizId),
+        user: new Types.ObjectId(userId),
+        finishedAt: { $ne: null },
+      })
+      .select("_id")
+      .lean()
+      .exec();
+
+    return {
+      taken: Boolean(attempt),
+      attemptId: attempt?._id?.toString(),
+    };
+  }
+
+  async startQuizSession(quizId: string, userId: string) {
+    // Verify quiz exists
+    const quiz = await this.quizModel.findById(quizId);
+    if (!quiz) {
+      throw new NotFoundException("Quiz not found");
+    }
+
+    const userObjectId = new Types.ObjectId(userId);
+    const quizObjectId = new Types.ObjectId(quizId);
+
+    // Check if user already has an active session for this quiz
+    const existingSession = await this.sessionModel.findOne({
+      user: userObjectId,
+      quiz: quizObjectId,
+      status: 'active',
+    });
+
+    if (existingSession) {
+      // Return existing session
+      return {
+        sessionId: existingSession._id.toString(),
+        quizId: quizId,
+        expiresAt: existingSession.expiresAt.toISOString(),
+      };
+    }
+
+    // Abandon any other active sessions for this user
+    await this.sessionModel.updateMany(
+      { user: userObjectId, status: 'active' },
+      { status: 'abandoned' }
+    );
+
+    // Create new session (expires in 20 minutes for all levels)
+    const now = new Date();
+    // Session expiration time per level (in minutes)
+    const sessionExpirationByLevel: Record<string, number> = {
+      beginner: 20,
+      middle: 20,
+      intermediate: 20,
+    };
+    const quizLevel = quiz.level || 'beginner';
+    const sessionExpirationMinutes = sessionExpirationByLevel[quizLevel] || 20;
+    const expiresAt = new Date(now.getTime() + sessionExpirationMinutes * 60 * 1000);
+
+    const session = new this.sessionModel({
+      user: userObjectId,
+      quiz: quizObjectId,
+      status: 'active',
+      startedAt: now,
+      lastSeenAt: now,
+      expiresAt: expiresAt,
+    });
+
+    await session.save();
+
+    return {
+      sessionId: session._id.toString(),
+      quizId: quizId,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  async getActiveSession(userId: string) {
+    const userObjectId = new Types.ObjectId(userId);
+    const now = new Date();
+
+    // Find active session that hasn't expired
+    const session = await this.sessionModel
+      .findOne({
+        user: userObjectId,
+        status: 'active',
+        expiresAt: { $gt: now },
+      })
+      .populate('quiz', '_id')
+      .lean()
+      .exec();
+
+    if (!session) {
+      return {
+        hasActiveSession: false,
+      };
+    }
+
+    return {
+      hasActiveSession: true,
+      sessionId: session._id.toString(),
+      quizId: (session.quiz as any)._id?.toString() || session.quiz.toString(),
+      expiresAt: session.expiresAt.toISOString(),
+    };
+  }
+
+  async heartbeatSession(sessionId: string, userId: string) {
+    const sessionObjectId = new Types.ObjectId(sessionId);
+    const userObjectId = new Types.ObjectId(userId);
+    const now = new Date();
+
+    // Find and update the session
+    const session = await this.sessionModel.findOneAndUpdate(
+      {
+        _id: sessionObjectId,
+        user: userObjectId,
+        status: 'active',
+        expiresAt: { $gt: now },
+      },
+      {
+        lastSeenAt: now,
+      },
+      { new: true }
+    ).exec();
+
+    if (!session) {
+      throw new NotFoundException('Active session not found or expired');
+    }
+
+    return {
+      ok: true,
+      expiresAt: session.expiresAt.toISOString(),
+    };
+  }
+
+  async abandonSession(sessionId: string, userId: string) {
+    const sessionObjectId = new Types.ObjectId(sessionId);
+    const userObjectId = new Types.ObjectId(userId);
+
+    // Find and abandon the session
+    const session = await this.sessionModel.findOneAndUpdate(
+      {
+        _id: sessionObjectId,
+        user: userObjectId,
+        status: 'active',
+      },
+      {
+        status: 'abandoned',
+      },
+      { new: true }
+    ).exec();
+
+    if (!session) {
+      throw new NotFoundException('Active session not found');
+    }
+
+    return {
+      ok: true,
     };
   }
 }

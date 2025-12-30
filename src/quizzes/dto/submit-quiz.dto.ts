@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsNotEmpty, IsString } from 'class-validator';
+import { ArrayMinSize, IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class SubmitAnswerDto {
   @IsString()
@@ -14,4 +14,9 @@ export class SubmitQuizDto {
   @IsArray()
   @ArrayMinSize(1)
   answers!: SubmitAnswerDto[];
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  sessionId?: string;
 }

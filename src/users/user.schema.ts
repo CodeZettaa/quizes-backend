@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { UserRole } from '../common/constants/roles.enum';
+import { SubjectName } from '../common/constants/subject-type.enum';
 
 export type UserDocument = User & Document;
 
@@ -28,6 +29,12 @@ export class User {
 
   @Prop({ type: Number, default: 0 })
   totalPoints!: number;
+
+  @Prop({
+    type: [{ type: String, enum: Object.values(SubjectName) }],
+    default: [],
+  })
+  selectedSubjects!: SubjectName[];
 
   @Prop({
     type: {

@@ -19,7 +19,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // Check if this is an OAuth route that failed (both initiation and callback)
     if (request.url?.includes('/auth/linkedin')) {
       console.error('[Global Exception Filter] LinkedIn OAuth error:', exception);
-      const frontendFailureUrl = process.env.FRONTEND_FAILURE_REDIRECT || 'http://localhost:8888/auth/login';
+      const frontendFailureUrl = process.env.FRONTEND_FAILURE_REDIRECT || process.env.FRONTEND_BASE_URL + '/auth/login' || 'http://localhost:8888/auth/login';
       return response.redirect(`${frontendFailureUrl}?error=social_login_failed`);
     }
 
@@ -61,7 +61,7 @@ async function bootstrap() {
   );
   
   app.enableCors({
-    origin: 'http://localhost:8888',
+    origin: process.env.FRONTEND_BASE_URL || 'http://localhost:8888',
     credentials: true,
   });
   app.useGlobalFilters(new AllExceptionsFilter());

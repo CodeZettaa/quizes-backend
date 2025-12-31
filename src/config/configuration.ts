@@ -10,4 +10,9 @@ export default () => ({
   ai: {
     apiKey: process.env.AI_API_KEY || "",
   },
+  frontend: {
+    baseUrl: process.env.FRONTEND_BASE_URL || "http://localhost:8888",
+    successRedirect: process.env.FRONTEND_SUCCESS_REDIRECT || "http://localhost:8888/auth/social/callback",
+    failureRedirect: process.env.FRONTEND_FAILURE_REDIRECT || "http://localhost:8888/auth/login",
+  },
 });

@@ -70,7 +70,7 @@ export class AuthController {
       const result = await this.authService.socialLogin(profile);
 
       const frontendSuccessUrl = this.configService.get<string>(
-        "FRONTEND_SUCCESS_REDIRECT"
+        "frontend.successRedirect"
       );
       if (!frontendSuccessUrl) {
         throw new Error("FRONTEND_SUCCESS_REDIRECT not configured");
@@ -81,7 +81,7 @@ export class AuthController {
     } catch (error) {
       console.error("Google OAuth error:", error);
       const frontendFailureUrl =
-        this.configService.get<string>("FRONTEND_FAILURE_REDIRECT") ||
+        this.configService.get<string>("frontend.failureRedirect") ||
         "http://localhost:8888/auth/login";
       res.redirect(`${frontendFailureUrl}?error=social_login_failed`);
     }
@@ -116,7 +116,7 @@ export class AuthController {
       const result = await this.authService.socialLogin(profile);
 
       const frontendSuccessUrl = this.configService.get<string>(
-        "FRONTEND_SUCCESS_REDIRECT"
+        "frontend.successRedirect"
       );
       if (!frontendSuccessUrl) {
         throw new Error("FRONTEND_SUCCESS_REDIRECT not configured");
@@ -133,7 +133,7 @@ export class AuthController {
         status: error?.response?.status,
       });
       const frontendFailureUrl =
-        this.configService.get<string>("FRONTEND_FAILURE_REDIRECT") ||
+        this.configService.get<string>("frontend.failureRedirect") ||
         "http://localhost:8888/auth/login";
       res.redirect(`${frontendFailureUrl}?error=social_login_failed`);
     }
